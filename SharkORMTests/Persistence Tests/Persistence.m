@@ -148,6 +148,13 @@
     
 }
 
+- (void)test_swift_object_print {
+    
+    SwiftTestClass* tc = [SwiftTestClass new];
+    [tc testThyself];
+    
+}
+
 - (void)test_Simple_Object_Update_Swift {
     
     [self cleardown];

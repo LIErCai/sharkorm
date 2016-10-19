@@ -29,6 +29,13 @@
 #import "sqlite3.h"
 #import "SRKRegistry.h"
 
+@interface SRKTransactionElement()
+
+- (void)appendStatement:(NSString*)statement;
+- (void)appendParameters:(NSArray*)params;
+
+@end
+
 static NSMutableDictionary* transactionForThread = nil;
 
 @implementation SRKTransactionGroup
@@ -111,8 +118,82 @@ static NSMutableDictionary* transactionForThread = nil;
 	
 	@autoreleasepool {
 		
-		
 		/* loop the transactions per database file */
+        
+        // create a dictionary <databasename>:<mutablearray statements>
+        //                                    <mutablearray params>
+        
+        NSMutableArray* aggregatedItems = [NSMutableArray new];
+        NSMutableDictionary* modifyItem = [NSMutableDictionary new];
+        NSMutableDictionary* deleteItem = [NSMutableDictionary new];
+        
+        for (SRKTransactionElement* item in self.transactionItems) {
+            if (!item.originalObject.exists) {
+                
+                [aggregatedItems addObject:item];
+                
+                // now add the FTS object if applicable
+                
+                if ([[item.originalObject class] FTSParametersForEntity]) {
+                    NSMutableString* propertiesList = [NSMutableString new];
+                    for (NSString* p in [[item.originalObject class] FTSParametersForEntity]) {
+                        if (propertiesList.length > 0) {
+                            [propertiesList appendString:@", "];
+                        }
+                        [propertiesList appendString:p];
+                    }
+                    
+                    if ([item.originalObject.Id isKindOfClass:[NSNumber class]]) {
+                        [item appendStatement:[NSString stringWithFormat:@"INSERT INTO fts_%@(docid, %@) SELECT Id, %@ FROM %@ WHERE Id = %@", [[item.originalObject class] description],propertiesList,propertiesList, [[item.originalObject class] description], [item.originalObject getField:SRK_DEFAULT_PRIMARY_KEY_NAME]]];
+                    } else {
+                        [item appendStatement:[NSString stringWithFormat:@"INSERT INTO fts_%@(docid, %@) SELECT Id, %@ FROM %@ WHERE Id = '%@'", [[item.originalObject class] description],propertiesList,propertiesList, [[item.originalObject class] description], [item.originalObject getField:SRK_DEFAULT_PRIMARY_KEY_NAME]]];
+                    }
+                }
+                
+            } else {
+                
+                // now split up the delete / update operations per database
+                if (![modifyItem objectForKey:item.database]) {
+                    [modifyItem setObject:[SRKTransaction new] forKey:item.database];
+                }
+                if (![deleteItem objectForKey:item.database]) {
+                    [deleteItem setObject:[SRKTransaction new] forKey:item.database];
+                }
+                
+                if (item.eventType == SharkORMEventUpdate) {
+                    
+                    SRKTransactionElement* this = [modifyItem objectForKey:item.database];
+                    [this appendStatement:item.statementSQL];
+                    [this appendParameters:item.parameters];
+                    
+                    if ([[item.originalObject class] FTSParametersForEntity]) {
+                        NSMutableString* propertiesList = [NSMutableString new];
+                        for (NSString* p in [[item.originalObject class] FTSParametersForEntity]) {
+                            if (propertiesList.length > 0) {
+                                [propertiesList appendString:@", "];
+                            }
+                            [propertiesList appendString:p];
+                        }
+                        
+                        if ([item.originalObject.Id isKindOfClass:[NSNumber class]]) {
+                            
+                            [SharkORM executeSQL:[NSString stringWithFormat:@"INSERT INTO fts_%@(docid, %@) SELECT Id, %@ FROM %@ WHERE Id = %@", [[item.originalObject class] description],propertiesList,propertiesList, [[item.originalObject class] description], [item.originalObject getField:SRK_DEFAULT_PRIMARY_KEY_NAME]] inDatabase:nil];
+                        } else {
+                            [SharkORM executeSQL:[NSString stringWithFormat:@"INSERT INTO fts_%@(docid, %@) SELECT Id, %@ FROM %@ WHERE Id = '%@'", [[item.originalObject class] description],propertiesList,propertiesList, [[item.originalObject class] description], [item.originalObject getField:SRK_DEFAULT_PRIMARY_KEY_NAME]] inDatabase:nil];
+                        }
+                    }
+                    
+                } else {
+                    
+                    SRKTransactionElement* this = [deleteItem objectForKey:item.database];
+                    [this appendStatement:item.statementSQL];
+                    [this appendParameters:item.parameters];
+                    
+                }
+                
+            }
+        }
+        
 		@synchronized(SRK_LOCK_WRITE) {
 			
 			for (NSString* databaseNameForClass in self.usedDatabases) {
@@ -237,20 +318,6 @@ static NSMutableDictionary* transactionForThread = nil;
 									
 									if (item.eventType == SharkORMEventInsert) {
 										
-										NSMutableString* propertiesList = [NSMutableString new];
-										for (NSString* p in [[item.originalObject class] FTSParametersForEntity]) {
-											if (propertiesList.length > 0) {
-												[propertiesList appendString:@", "];
-											}
-											[propertiesList appendString:p];
-										}
-										
-										if ([item.originalObject.Id isKindOfClass:[NSNumber class]]) {
-											[SharkORM executeSQL:[NSString stringWithFormat:@"INSERT INTO fts_%@(docid, %@) SELECT Id, %@ FROM %@ WHERE Id = %@", [[item.originalObject class] description],propertiesList,propertiesList, [[item.originalObject class] description], [item.originalObject getField:SRK_DEFAULT_PRIMARY_KEY_NAME]] inDatabase:nil];
-										} else {
-											[SharkORM executeSQL:[NSString stringWithFormat:@"INSERT INTO fts_%@(docid, %@) SELECT Id, %@ FROM %@ WHERE Id = '%@'", [[item.originalObject class] description],propertiesList,propertiesList, [[item.originalObject class] description], [item.originalObject getField:SRK_DEFAULT_PRIMARY_KEY_NAME]] inDatabase:nil];
-										}
-										
 										[item.originalObject entityDidInsert];
 										if (!item.originalObject.exists) {
 											/* now we need to register this object with the default registry, first check to see if the user wants a default domain */
@@ -280,20 +347,7 @@ static NSMutableDictionary* transactionForThread = nil;
 										
 									}
 									if (item.eventType == SharkORMEventUpdate) {
-										
-										NSMutableString* propertiesList = [NSMutableString new];
-										for (NSString* p in [[item.originalObject class] FTSParametersForEntity]) {
-											if (propertiesList.length > 0) {
-												[propertiesList appendString:@", "];
-											}
-											[propertiesList appendString:p];
-										}
-										
-										if ([item.originalObject.Id isKindOfClass:[NSNumber class]]) {
-											[SharkORM executeSQL:[NSString stringWithFormat:@"INSERT INTO fts_%@(docid, %@) SELECT Id, %@ FROM %@ WHERE Id = %@", [[item.originalObject class] description],propertiesList,propertiesList, [[item.originalObject class] description], [item.originalObject getField:SRK_DEFAULT_PRIMARY_KEY_NAME]] inDatabase:nil];
-										} else {
-											[SharkORM executeSQL:[NSString stringWithFormat:@"INSERT INTO fts_%@(docid, %@) SELECT Id, %@ FROM %@ WHERE Id = '%@'", [[item.originalObject class] description],propertiesList,propertiesList, [[item.originalObject class] description], [item.originalObject getField:SRK_DEFAULT_PRIMARY_KEY_NAME]] inDatabase:nil];
-										}
+
 										
 										[item.originalObject entityDidUpdate];
 										

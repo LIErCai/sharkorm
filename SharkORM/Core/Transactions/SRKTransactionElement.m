@@ -26,4 +26,26 @@
 
 @implementation SRKTransactionElement
 
+- (void)appendStatement:(NSString*)statement {
+    
+    if (!self.statementSQL) {
+        self.statementSQL = statement;
+    } else {
+        self.statementSQL = [self.statementSQL stringByAppendingString:statement];
+        self.statementSQL = [self.statementSQL stringByAppendingString:@";"];
+    }
+    
+}
+
+- (void)appendParameters:(NSArray*)params {
+
+    if (!self.parameters) {
+        self.parameters = params;
+    } else if (params) {
+        self.parameters = [self.parameters arrayByAddingObjectsFromArray:params];
+    }
+    
+}
+
+
 @end

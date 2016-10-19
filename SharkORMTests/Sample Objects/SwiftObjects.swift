@@ -9,8 +9,8 @@ import Foundation
 
 class PersonSwift : SRKObject {
     
-    internal dynamic var Name: String?
-    internal dynamic var age: NSNumber?
+    internal dynamic var Name: String!
+    internal dynamic var age: NSNumber = 39
     internal dynamic var department: DepartmentSwift?
     
 }
@@ -48,6 +48,15 @@ class SwiftTestClass : SRKObject {
 	
 	func testThyself() {
 		
+        let l = PersonSwift()
+        l.Name = "adrian";
+        l.commit()
+        
+        let q = PersonSwift.query().fetch();
+        print(q[0]);
+        
+        print((q[0] as! PersonSwift).Name)
+        
 	}
 	
 	class PrivateSwiftClass: SRKObject {
